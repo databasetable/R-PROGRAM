@@ -12,49 +12,7 @@ getwd()
 library(plyr)
 library(foreach)
 
-readtsvdates <- function(dase.dir,app.name,date.from,date.to) {
-  date.from <-as.Date(date.from)
-  date.to <- as.Date(date.to)
-  dates <- seq.Date(date.from,date.to,by='day')
-  x <- ldply(foreach(day = dates, combine = rbind) %do% {
-    read.csv(sprintf("%s/%s/%s/data.tsv", base.dir, app.name, day),
-             header = T,
-             sep = "\t", stringsAsFactors = F)
-  })
-  x
-}
-
-
-
-#用于生成获取其他各个数据的专用函数
-#读入DAU数据的函数
-readdau <- function(app.name,date.from,date.to=date.from) {
-  data <- readtsvdates("sample-data/section8/daily/dau",app.name,date.from,date.to)
-  data
-}
-#读入DPU数据的函数
-readdpu <- function(app.name,date.from,date.to=date.from) {
-  data <- readtsvdates("sample-data/section8/daily/dau",app.name,date.from,date.to)
-  data 
-}
-
-#读入行为数据的函数
-readactiondaily <- function(app.name,date.from,date.to=date.from) {
-  data <- readtsvdates("sample-data/section8/daily/dau",
-                       app.name,date.from,date.to)
-  data
-}
-
-##读入数据
-dau <- readdau('game-01','2013-05-01','2013-10-31')
-
-head(dau)
-
-rm(list=ls())
-
-
-
-##书中代码
+##读入数据代码
 readTsvDates <- function(base.dir, app.name, date.from, date.to) {
   date.from <- as.Date(date.from)
   date.to <- as.Date(date.to)
