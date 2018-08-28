@@ -1,0 +1,282 @@
+setwd('E://培训课程//数据分析实战/')
+getwd()
+
+####弄清长期参与游戏用户的行为特征
+####具有哪些行为的用户会是长期用户
+
+#生成用于读入数据的函数
+library(plyr)
+library(foreach)
+
+#获取首次访问时间的数据
+readinstall <- function(app.name, target.day) {
+  base.dir <- 'sample-data/section9/snapshot/install'
+  f <- sprintf('%s/%s/%s/install.csv', base.dir, app.name, target.day)
+  read.csv(f,header=T,stringsAsFactors=FALSE)
+}
+#生成函数
+install <- readinstall('game-01','2013-09-30')
+head(install)
+install
+
+#获取DAU数据
+readdau <- function(app.name, date.from, date.to) { 
+  date.from <- as.Date(date.from)
+  date.to <- as.Date(date.to)
+  dates <- seq.Date(date.from, date.to, by = 'day')
+  ldply(foreach(day = dates, combine= rbind) %do% {
+    dase.dir <- 'sample-data/section9/daily/dau'
+    f <- sprintf('%s/%s/%s/dau.csv', dase.dir, app.name, day)
+    read.csv(f, header = T, stringsAsFactors = FALSE)
+  })
+}
+#生成数据
+dau <- readdau('game-01','2013-06-01','2013-09-30')
+head(dau)
+
+#获取行为日志数据
+readaction <- function(app.name, action.name, date.from, date.to) {
+  date.from <- as.Date(date.from)
+  date.to <- as.Date(date.to)
+  dates <- seq.Date(date.from, date.to, by = 'day')
+  ldply(foreach(day = dates, combine= rbind) %do% {
+    dase.dir <- 'sample-data/section9/daily/action'
+    f <- sprintf('%s/%s/%s/%s/%s.csv', dase.dir, app.name, action.name, day, action.name)
+    read.csv(f, header = T, stringsAsFactors = FALSE)
+  })
+}
+#获取数据
+#battle
+battle <- readaction('game-01','battle','2013-06-01','2013-08-31')
+head(battle)
+#message
+message <- readaction('game-01','message','2013-06-01','2013-08-31')
+head(message)
+#help
+help <- readaction('game-01','help','2013-06-01','2013-08-31')
+head(help)
+
+##计算登录密度
+#合并DAU和首次访问时间的数据
+dau.ins <- merge(dau,install,by='user_id',suffixes=c('','.inst'))
+head(dau.ins)
+
+#限定为用户开始游戏后第7~13天的数据
+dau.ins$log_date <- as.Date(dau.ins$log_date)
+dau.ins$log_date.inst <- as.Date(dau.ins$log_date.inst)
+dau.ins$elapsed_days <- as.numeric(dau.ins$log_date - dau.ins$log_date.inst)
+str(dau.ins$log_date - dau.ins$log_date.inst)
+
+dau.13 <- dau.ins[dau.ins$elapsed_days <= 13 & dau.ins$elapsed_days >= 7,]
+head(dau.13,100)
+
+#计算登录密度
+dau.13ds <- ddply(dau.13, .(user_id), summarize, density = length(log_date)/7)
+length(dau.13$log_date)
+
+#合并分析对象用户和登录密度数据
+target <- install[install$log_date <= '2013-08-25' & install$log_date >= '2013-06-01',]
+target.ds <- merge(target,dau.13ds,by='user_id',all.x =T)
+target.ds$density[is.na(target.ds$density)] <- 0
+head(target.ds)
+tail(target.ds)
+
+###生成关于战斗的数据
+##生成实数数据
+#合并战斗行为数据和用户首次访问时间的数据
+battle.ins <- merge(battle, install, by='user_id', suffixes = c('', '.inst'))
+head(battle.ins)
+battle.ins$log_date <- as.Date(battle.ins$log_date)
+battle.ins$log_date.inst <- as.Date(battle.ins$log_date.inst)
+battle.ins$elapsed_days <- as.numeric(battle.ins$log_date - battle.ins$log_date.inst)
+
+#限定时间差为1周内
+battle.7 <- battle.ins[battle.ins$elapsed_days <= 6 & battle.ins$elapsed_days >= 0,]
+tail(battle.7)
+
+#将首次访问之后经过的天数按列排列
+library(reshape2)
+battle.7$elapsed_days <- paste0('d',battle.7$elapsed_days)
+battle.dcast <- dcast(battle.7, user_id ~ elapsed_days, value.var = 'count', sum)
+head(battle.dcast)
+
+##生成比率数据和PCA数据
+#生成比率数据
+battle.prop <- battle.dcast
+battle.prop[,-1] <- battle.prop[,-1]/rowSums(battle.prop[,-1])
+head(battle.prop)
+
+#生成PCA
+b.pca <- prcomp(battle.dcast[,-1],scale=TRUE)
+summary(b.pca)
+b.pca$x
+b.pca.cast <- data.frame(user_id = battle.dcast$user_id,b.pca$x)
+head(b.pca.cast)
+
+
+##生成发送消息的数据
+#生成实数数据
+message.ins <- merge(message, install, by='user_id', suffixes = c('', '.inst'))
+head(message.ins)
+message.ins$log_date <- as.Date(message.ins$log_date)
+message.ins$log_date.inst <- as.Date(message.ins$log_date.inst)
+message.ins$elapsed_days <- as.numeric(message.ins$log_date -message.ins$log_date.inst)
+
+#限定时间差为1周内
+message.7 <- message.ins[message.ins$elapsed_days <= 6 & message.ins$elapsed_days >= 0,]
+tail(message.7)
+
+#将首次访问之后经过的天数按列排列
+library(reshape2)
+message.7$elapsed_days <- paste0('d',message.7$elapsed_days)
+message.dcast <- dcast(message.7, user_id ~ elapsed_days, value.var = 'count', sum)
+head(message.dcast)
+
+##生成比率数据和PCA数据
+#生成比率数据
+message.prop <- message.dcast
+message.prop[,-1] <- message.prop[,-1]/rowSums(message.prop[,-1])
+head(message.prop)
+
+#生成PCA
+m.pca <- prcomp(message.dcast[,-1],scale=TRUE)
+summary(m.pca)
+m.pca$x
+m.pca.cast <- data.frame(user_id = message.dcast$user_id,m.pca$x)
+head(m.pca.cast)
+
+
+##生成协作数据
+#生成实数数据
+#合并战斗行为数据和用户首次访问时间的数据
+help.ins <- merge(help, install, by='user_id', suffixes = c('', '.inst'))
+head(help.ins)
+help.ins$log_date <- as.Date(help.ins$log_date)
+help.ins$log_date.inst <- as.Date(help.ins$log_date.inst)
+help.ins$elapsed_days <- as.numeric(help.ins$log_date - help.ins$log_date.inst)
+
+#限定时间差为1周内
+help.7 <- help.ins[help.ins$elapsed_days <= 6 & help.ins$elapsed_days >= 0,]
+tail(help.7)
+
+#将首次访问之后经过的天数按列排列
+library(reshape2)
+help.7$elapsed_days <- paste0('d',help.7$elapsed_days)
+help.dcast <- dcast(help.7, user_id ~ elapsed_days, value.var = 'count', sum)
+head(help.dcast)
+
+##生成比率数据和PCA数据
+#生成比率数据
+help.prop <- help.dcast
+help.prop[,-1] <- help.prop[,-1]/rowSums(help.prop[,-1])
+head(help.prop)
+
+#生成PCA
+h.pca <- prcomp(help.dcast[,-1],scale=TRUE)
+summary(h.pca)
+h.pca$x
+h.pca.cast <- data.frame(user_id = help.dcast$user_id,h.pca$x)
+head(h.pca.cast)
+
+##对行为日志进行聚类
+#用来生成关于类数据的函数
+sprintf('%s%02d','battle',1)
+createclusterdata <- function(aname, x, x.prop, x.pca) {
+  set.seed(10)
+  df <- ldply(foreach(k = 3:6, combine = rbind) %do% {
+    km <- kmeans(x[,-1], k)
+    km.prop <- kmeans(x.prop[,-1], k)
+    km.pca <- kmeans(x.pca[,-1], k)
+    data.frame(user_id = x$user_id, cluster = sprintf('%s%02d', aname, k), 
+               freq.cluster.id = km$cluster, prop.cluster.id = km.prop$cluster,
+               pca.cluster.id = km.pca$cluster)
+  })
+  cluster.melt <- melt(df, id.vars = c('user_id','cluster'))
+  dcast(cluster.melt, user_id ~ cluster + variable)
+}
+
+#战斗
+battle.cluster <- createclusterdata('battle', battle.dcast, battle.prop, b.pca.cast)
+head(battle.cluster,50)
+
+#发送消息
+message.cluster <- message.cluster <- createclusterdata('message', message.dcast, message.prop, m.pca.cast)
+head(message.cluster,50)
+
+#协作消息
+help.cluster <- createclusterdata('help', help.dcast, help.prop, h.pca.cast)
+head(battle.cluster,50)
+
+
+#登录密度与类的合并
+#战斗数据的合并
+cluster.ds <- merge(target.ds, battle.cluster, by='user_id', all.x=TRUE)
+cluster.ds <- merge(cluster.ds, message.cluster, by='user_id', all.x=TRUE)
+cluster.ds <- merge(cluster.ds, help.cluster, by='user_id', all.x=TRUE)
+cluster.ds[is.na(cluster.ds)] <- 0
+names(cluster.ds)[2:6]
+
+##按照登录密度由小到大的顺序重新排列
+#将按列排列的类转化为按行排列的形式
+cluster.ds.melt <- melt(cluster.ds[,-c(2:6)], id.vars = c('user_id','density'))
+#按照类的种类或编号计算各个类的平均登录密度
+cluster.avg <- ddply(cluster.ds.melt, .(variable , value) , summarize, avg.density = mean(density) )
+
+#重新赋予一个新的类编号
+cluster.avg <- arrange(cluster.avg, variable, avg.density)
+cluster.avg <- ddply(cluster.avg, .(variable), transform, value2 = sort(value))
+
+#按照新的类编号进行合并
+cluster.ds.melt2 <- merge(cluster.ds.melt,cluster.avg,by=c('variable','value'))
+head(cluster.ds.melt2,50)
+
+#将类的种类整理成按列排列的形式
+cluster.data <- dcast(cluster.ds.melt2, user_id + density ~ variable , value.var = 'value2')
+
+##决策树分析的执行和可视化
+library(rpart)
+library(rpart.plot)
+library(partykit)
+fit <- rpart(density ~ .,data = cluster.data[,-1])
+fit
+prp(fit)
+?plot
+plot(as.party(fit),tp_args=T)
+
+#协作主成分的详细内容
+names(cluster.data)
+names(cluster.ds.melt2)
+cluster.data3 <- cluster.ds.melt2[cluster.ds.melt2$variable == 'help04_pca.cluster.id', c('user_id','avg.density','value2')]
+names(cluster.data3)[3] <- 'clusters'
+
+help.prop2 <- merge(help.prop,cluster.data3, by= 'user_id')
+table(help.prop2$clusters)
+
+#计算各个类的平均登录密度
+help.cast.summary <- ddply(help.prop2, .(clusters), summarize, 
+                           log.density = avg.density[1],
+                           d0 = sum(d0)/length(user_id),
+                           d1 = sum(d1)/length(user_id),
+                           d2 = sum(d2)/length(user_id),
+                           d3 = sum(d3)/length(user_id),
+                           d4 = sum(d4)/length(user_id),
+                           d5 = sum(d5)/length(user_id),
+                           d6 = sum(d6)/length(user_id)
+                           )
+help.cast.summary 
+
+
+#将各个类的平均登录密度可视化
+library(ggplot2)
+ggplot(help.cast.summary, aes(x=clusters, y=log.density)) + geom_line() + geom_point() + xlab('主成分分类') + ylab('平均登录密度') + 
+  annotate('text',x=3,y=0.5,label='类1与类2～4登录密度差类很大',family='setif', colour="darkred", size=3)
+
+#将协作行为按照类和时间可视化
+help.cast.summary.melt <- melt(help.cast.summary[,-2], id.vars = 'clusters')
+help.cast.summary.melt$day <- as.numeric(substr(help.cast.summary.melt$variable,2,3)) 
+ggplot(help.cast.summary.melt, aes(x=day, y=value,col=as.factor(clusters))) + geom_point() + geom_line()
+
+#对开始游戏后第2周的登录密度影响最大的社交行为是‘协作’行为
+#在开始游戏后协作的社交行为慢慢增加的哦用户在这之后会稳定的访问游戏
+
+

@@ -1,0 +1,118 @@
+setwd('E://培训课程//数据分析实战/')
+getwd()
+data <- read.csv('section7-dau.csv',stringsAsFactors=FALSE)
+head(data)
+sapply(data,class)
+library(plyr)
+ddply(data,.(region_month),summarize,count=length(user_id))
+ddply(data,.(region_month,device),summarize,count=length(user_id))
+library(reshape2)
+table(data$region_month,data$device)
+dcast(data, region_month~device,value.var = "user_id",length)
+#可视化
+dau <- ddply(data,.(region_month,device),summarize,count=length(user_id))
+library(ggplot2)
+ggplot(dau,aes(x=as.Date(dau$region_day),y=count,color=device,shape=device,lty=device))+geom_point(size=1)+geom_line(lwd=1)
+
+###数据加工
+View(data)
+##非智能手机更换到智能手机并进行帐号迁转设定的数据
+#访问用户
+mau <- unique(data[,c('region_month','user_id','device')])
+#fp访问用户
+mau.FP <- unique(data[data$device=='FP',c('region_month','user_id','device')])
+#SP访问用户
+mau.SP <- unique(data[data$device=='SP',c('region_month','user_id','device')])
+#分别获取1月份和2月份的数据
+FP.mau1 <- mau.FP[mau.FP$region_month=='2013-01',]
+FP.mau2 <- mau.FP[mau.FP$region_month=='2013-02',]
+
+SP.mau1 <- mau.SP[mau.SP$region_month=='2013-01',]
+SP.mau2 <- mau.SP[mau.SP$region_month=='2013-02',]
+
+#1月份的非智能手机用户在2月份的访问情况
+mau$is_access <- 1
+FP.mau1 <- merge(FP.mau1,mau[mau$region_month=='2013-02',c("user_id",'is_access')],by='user_id',all.x=TRUE)
+FP.mau1$is_access <- ifelse(is.na(FP.mau1$is_access),0,1)
+head(FP.mau1)
+#1月份访问过游戏的非智能手机用户在2月份是否是继续通过非智能手机来访问的
+FP.mau2$is_fp <- 1
+FP.mau1 <- merge(FP.mau1,FP.mau2[,c("user_id",'is_fp')],by='user_id',all.x=T) 
+FP.mau1$is_fp[is.na(FP.mau1$is_fp)] <- 0
+#1月份访问过游戏的非智能手机用户在2月份是否是继续通过智能手机来访问的
+SP.mau2$is_sp <- 1
+FP.mau1 <- merge(FP.mau1,SP.mau2[,c("user_id",'is_sp')],by='user_id',all.x=T) 
+FP.mau1$is_sp[is.na(FP.mau1$is_sp)] <- 0
+#过滤数据：1月份访问过游戏的非智能手机用户在2月份没有访问，或2月份通过智能手机登录的用户
+FP.mau <- FP.mau1[FP.mau1$is_access ==0 | FP.mau1$is_sp ==1,]
+
+##关于是否每天访问游戏的数据整理
+FP.dau1 <- data[data$device=='FP' & data$region_month == '2013-01',]
+FP.dau1$is_access <- 1
+dcast.dau1 <- dcast(FP.dau1,user_id ~ region_day,value.var = 'is_access',function(x) as.character(length(x)))
+names(dcast.dau1)[-1] <- paste0('x',1:31,"day")
+head(dcast.dau1)
+str(dcast.dau1)
+
+##将2月份的访问数据和智能手机用户数据合并
+dcast.dau1 <- merge(dcast.dau1,FP.mau[,c('user_id','is_sp')],by='user_id')
+View(dcast.dau1)
+table(dcast.dau1$is_sp)
+
+
+#基于逻辑回归建立mox
+fit <- glm(is_sp~.,data=dcast.dau1[,-1],family='binomial')
+summary(fit)
+fit.logit <- step(fit)
+formula(fit.logit)
+summary(fit.logit)
+#多重共线性与交叉验证
+library(dummies)
+dumm<-dummy.data.frame(dcast.dau1[,-1],sep="_")
+cor(dcast.dau1[,-1])
+DU<-prcomp(dumm,scale=TRUE)
+print(DU)
+summary(DU)
+biplot(DU,col=c('gray','black'))
+
+
+#利用生成的模型来进行预测
+predict(fit.logit,dcast.dau1[,-1],type='response')
+dcast.dau1$prob <- round(fitted(fit.logit),2)
+
+ggplot(dcast.dau1,aes(x=prob,fill=factor(is_sp))) + geom_histogram(binwidth=0.05)
+
+ggplot(dcast.dau1,aes(y=is_sp,x=prob)) + geom_point()+geom_smooth(se=FALSE)
+
+#预测在智能手机上是否进行了帐号迁转设定
+dcast.dau1$pred <- ifelse(dcast.dau1$prob > 0.5,1,0)
+
+#预测值和实际值
+table(dcast.dau1[,c('is_sp','pred')])
+sum(dcast.dau1$is_sp==dcast.dau1$pred)/length(dcast.dau1$pred)
+
+library(caret)
+
+confusionMatrix(factor(dcast.dau1$is_sp),factor(dcast.dau1$pred))
+
+
+#根据预测结果来推测用户群
+#实际为1，预测为1
+dcast1 <- dcast.dau1[dcast.dau1$is_sp==1 & dcast.dau1$pred==1,]
+dcast1[order(dcast1$prob,decreasing=TRUE),]
+#实际为0，预测为1
+dcast2 <- dcast.dau1[dcast.dau1$is_sp==0 & dcast.dau1$pred==1,]
+dcast2[order(dcast2$prob,decreasing=TRUE),]
+#实际为0，预测为0
+dcast3 <- dcast.dau1[dcast.dau1$is_sp==0 & dcast.dau1$pred==0,]
+dcast3[order(dcast3$prob,decreasing=TRUE),]
+
+
+
+
+
+
+
+
+
+
