@@ -1,0 +1,311 @@
+setwd('E://培训课程//数据分析实战/')
+getwd()
+#游戏用户分类
+##希望了解用户的特点
+#通过已有的市场细分无法明确目标用户群
+#能否根据用户的行为模式进行用户分类
+#另外通过参照各个类别的KPI，得到KPI高低的用户在行为上有何差异
+#将分析结果与运营策略相结合
+
+##探讨分析数据
+#生成获取指定日期的函数
+library(plyr)
+library(foreach)
+
+readtsvdates <- function(dase.dir,app.name,date.from,date.to) {
+  date.from <-as.Date(date.from)
+  date.to <- as.Date(date.to)
+  dates <- seq.Date(date.from,date.to,by='day')
+  x <- ldply(foreach(day = dates, combine = rbind) %do% {
+    read.csv(sprintf("%s/%s/%s/data.tsv", base.dir, app.name, day),
+             header = T,
+             sep = "\t", stringsAsFactors = F)
+  })
+  x
+}
+
+
+
+#用于生成获取其他各个数据的专用函数
+#读入DAU数据的函数
+readdau <- function(app.name,date.from,date.to=date.from) {
+  data <- readtsvdates("sample-data/section8/daily/dau",app.name,date.from,date.to)
+  data
+}
+#读入DPU数据的函数
+readdpu <- function(app.name,date.from,date.to=date.from) {
+  data <- readtsvdates("sample-data/section8/daily/dau",app.name,date.from,date.to)
+  data 
+}
+
+#读入行为数据的函数
+readactiondaily <- function(app.name,date.from,date.to=date.from) {
+  data <- readtsvdates("sample-data/section8/daily/dau",
+                       app.name,date.from,date.to)
+  data
+}
+
+##读入数据
+dau <- readdau('game-01','2013-05-01','2013-10-31')
+
+head(dau)
+
+rm(list=ls())
+
+
+
+##书中代码
+readTsvDates <- function(base.dir, app.name, date.from, date.to) {
+  date.from <- as.Date(date.from)
+  date.to <- as.Date(date.to)
+  dates <- seq.Date(date.from, date.to, by = "day")
+  x <- ldply(foreach(day = dates, combine = rbind) %do% {
+    read.csv(sprintf("%s/%s/%s/data.tsv", base.dir, app.name, day),
+             header = T,
+             sep = "\t", stringsAsFactors = F)
+  })
+  x
+}
+
+# 读入DAU数据的函数
+readDau <- function(app.name, date.from, date.to = date.from) {
+  data <- readTsvDates("sample-data/section8/daily/dau", app.name,
+                       date.from, date.to)
+  data
+}
+# 读入DPU数据的函数
+readDpu <- function(app.name, date.from, date.to = date.from) {
+  data <- readTsvDates("sample-data/section8/daily/dpu", app.name,
+                       date.from, date.to)
+  data
+}
+# 读入行为数据的函数
+readActionDaily <- function(app.name, date.from, date.to = date.from) {
+  data <- readTsvDates("sample-data/section8/daily/action", app.name,
+                       date.from, date.to)
+  data
+}
+
+# 读入数据
+
+# DAU
+dau <- readDau("game-01", "2013-05-01", "2013-10-31")
+head(dau)
+#DPU
+dpu <- readDpu("game-01", "2013-05-01", "2013-10-31")
+head(dpu)
+#Action
+action <- readActionDaily("game-01", "2013-10-31", "2013-10-31")
+head(action)
+
+cor(action[,4:57])
+b <- prcomp(action[,4:57],scale=TRUE)
+
+
+
+#合并DAU DPU
+daup <- merge(dau,dpu,by=c('log_date','app_name','user_id'),all.x=T)
+#添加销售额标志位
+daup$is.payment <- ifelse(is.na(daup$payment),0,1)
+#将无消费记录的销售额设为0
+daup$payment[is.na(daup$payment)] <- 0
+head(daup)
+
+#按月统计
+#增加一列表示月份
+daup$log_month <- substr(daup$log_date,1,7)
+head(daup)
+#按月统计
+mau <- ddply(daup,.(log_month,user_id),summarize,payment=sum(payment),access_day=length(log_month))
+head(mau)
+
+#确定排名范围
+library(ykmeans)
+library(ggplot2)
+library(scales)
+
+#A47为排行榜得分
+?kmeans
+user <- kmeans(action$A47,3)
+table(user$cluster)
+fit <- ykmeans(action,'A47','A47',3)
+table(fit$cluster)
+
+#排行榜得分分布
+?arrange
+library(ggplot2)
+arrange(fit,desc(A47)) #mtcars[with(fit,order(A47)),]
+ggplot(arrange(fit,desc(A47)),aes(x = 1:length(user_id),y = A47,col = as.factor(cluster),shape = as.factor(cluster)))+
+  geom_line()+
+  xlab('user')+
+  ylab('rank point')+
+  scale_y_continuous(label=comma)+
+  ggtitle('rank point')+
+  theme(legend.position='none')
+
+#限定排名靠前的用户
+fit.1 <- fit[fit$cluster>=2,names(action)]
+
+##数据预处理
+#进行主成分分析
+library(caret)
+fitf <- fit.1[,-c(1:3)]
+head(fitf)
+row.names(fitf) <- fit.1$user_id
+head(fitf)
+#删除信息量少的变量
+idx <- nearZeroVar(fitf)
+fitf <- fitf[,-idx]
+#删除相关性高的变量
+fit.cor <- cor(fitf)
+idx1 <- findCorrelation(fit.cor,cutoff=0.7)
+fift <- fitf[,-idx1]
+#进行主成分分析
+fitpca <- prcomp(fift,scale=T)
+str(fitpca)
+fitpca$rotation #旋转载荷
+fitpca$x        #主成分值
+#plot(fitpca)
+#plot(fitpca,type='lines')
+#biplot(fitpca,col=c('gray','black'))
+
+##进行聚类
+?ykmeans
+#把主成分作为自变量使用
+action.pca <- data.frame(fitpca$x)
+keys <- names(action.pca)
+action.km <- ykmeans(action.pca,keys,'PC1',3:6)#将第1主成分的散步最小的类的个数作为最合适的数量
+table(action.km$cluster)
+ggplot(action.km,aes(x=PC1,y=PC2,col=as.factor(cluster),shape=as.factor(cluster)))+
+  geom_point()
+
+#kmeans()
+#通过总簇内平方和定位增速放缓的点
+kmeans.plot <- function (data, cluster=15, seed=9875) {
+  set.seed(seed)
+  ss <- numeric(cluster)
+  ss[1] <- (nrow(data)-1) * sum(apply(data, 2, var))
+  for (i in 2:cluster) {
+    ss[i] <- sum(kmeans(data, centers=i)$withinss)
+  }
+  plot(1:cluster, ss, type='b', pch=18, xlab='#cluster', ylab='total withinss across cluster')
+}
+names(action.pca)
+data <- scale(action.pca)
+kmeans.plot(data,cluster=8)
+k=5
+
+
+
+##计算每个类的平均值
+fift$cluster <- action.km$cluster
+names(fift)
+fift.center <- 
+ldply(lapply(sort(unique(fift$cluster)),
+             function (i) {
+                x <- fift[fift$cluster == i,
+                          -ncol(fift)]
+                apply(x, 2, function(d) mean(d))
+                }))
+
+##生成用于雷达图的数据
+library(fmsb)
+#对雷达图所需的数据进行整理
+#排除相关性较高的变量
+df <- fift.center[,-(ncol(fift.center)-1)]
+df.cor <- cor(df)
+df.idx <- findCorrelation(df.cor,cutoff=0.91)
+df <- df[,-df.idx]
+names(df)
+#
+df.tu <- function(df){
+  df <- data.frame(df)
+  dfmax <- apply(df, 2, max) + 1
+  dfmin <- apply(df, 2, min) - 1
+  as.data.frame(rbind(dfmax, dfmin, df))
+}
+#生成雷达数据
+df.fitt <- df.tu(scale(df))
+names(df.fitt)
+names(df.fitt) <- c('级别','救援他人的次数','被救援的次数','对战地方首领的次数','donot konw','参与游戏的次数')
+
+#画出雷达图
+#雷达图导出中文需要先导入字体
+library(sysfonts)
+library(showtext)
+radarchart(df.fitt, seg=5, plty=1:5, plwd=4, pcol=rainbow(5))
+legend('topright', legend = 1:5, col=rainbow(5), lty=1:5 )
+
+#轻度用户
+#经常帮助他人的用户
+#自力更生的用户
+#经常帮助他人的用户
+#经常互相帮助的用户
+
+#计算每个类的KPI
+fift$user_id <- as.numeric(rownames(fift))
+mau
+action.kpt <- merge(fift, mau ,by = c('user_id'))
+ddply(action.kpt, .(cluster), summarize, arpu = round(mean(payment)), access_days = round(mean(mean(access_day)))
+
+  
+      
+###补充分类算法的变量选择方法
+#从相关系数计算变量的重要程度，推介使用较高相关系数的函数
+library(FSelector)
+??FSelector
+?linear.correlation
+#皮尔逊相关系数：连续型数值变量
+linear.correlation()
+#斯皮尔曼相关系数：离散或类别有序型变量：需排序
+rank.correlation(fitf)
+library(mlbench)
+data(BostonHousing)
+d=BostonHousing[-4] # only numeric variables
+
+weights <- linear.correlation(medv~., d)
+print(weights)
+subset <- cutoff.k(weights, 3)
+f <- as.simple.formula(subset, "medv")
+print(f)
+
+weights <- rank.correlation(medv~., d)
+print(weights)
+subset <- cutoff.k(weights, 3)
+f <- as.simple.formula(subset, "medv")
+print(f)
+
+#依据独立性检验，评估变量的重要性
+library(FSelector)
+?chi.squared
+library(mlbench)
+data(HouseVotes84)
+
+weights <- chi.squared(Class~., HouseVotes84)
+print(weights)
+subset <- cutoff.k(weights, 5)
+f <- as.simple.formula(subset, "Class")
+print(f)
+
+
+#使用模型评估变量的重要性
+library(caret)
+library(mlbench)
+data(HouseVotes84)
+?varImp
+#object：回归或分类模型
+library(rpart)
+m <- rpart(Class~., HouseVotes84)
+varImp(m)
+
+
+
+rm(list=ls())
+
+
+
+
+
+
+
+
